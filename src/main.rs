@@ -30,6 +30,7 @@ struct AppState {
     origin: String,
     secure: bool,
     revision: String,
+    iam_proxy_key: Option<String>,
 }
 
 struct ApiError(StatusCode, String);
@@ -75,6 +76,9 @@ impl AppState {
             secure: origin.starts_with("https://"),
             origin: origin.trim_end_matches('/').to_owned(),
             revision,
+            iam_proxy_key: std::env::var("TIMETABLE_IAM_PROXY_KEY")
+                .ok()
+                .filter(|key| key.len() >= 32),
         })
     }
     fn cookie_name(&self) -> &str {
@@ -153,7 +157,7 @@ async fn read_schedule(State(state): State<AppState>, headers: HeaderMap) -> Api
             })
             .map_err(|e| e.to_string())?;
         let data: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-        Ok(json!({"data":data,"revision":revision,"authenticated":authenticated}))
+        Ok(json!({"data":data,"revision":revision,"authenticated":authenticated,"iamEnabled":state.iam_proxy_key.is_some()}))
     })
     .await
     .map_err(internal)?
@@ -279,6 +283,55 @@ async fn logout(
         .insert("set-cookie", state.cookie("", 0));
     Ok(response)
 }
+
+fn valid_iam_headers(headers: &HeaderMap, key: Option<&str>) -> bool {
+    use subtle::ConstantTimeEq;
+    let Some(key) = key else {
+        return false;
+    };
+    let supplied = headers
+        .get("x-iam-key")
+        .map(|v| v.as_bytes())
+        .unwrap_or_default();
+    headers.get("x-iam-user").is_some_and(|v| v == "krahsu")
+        && headers
+            .get("x-iam-groups")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.split(',').any(|group| group.trim() == "owner"))
+        && bool::from(key.as_bytes().ct_eq(supplied))
+}
+
+async fn iam_login(State(state): State<AppState>, headers: HeaderMap) -> ApiResult {
+    if !valid_iam_headers(&headers, state.iam_proxy_key.as_deref()) {
+        return Err(ApiError(StatusCode::UNAUTHORIZED, "请通过归一登录".into()));
+    }
+    let mut response = StatusCode::SEE_OTHER.into_response();
+    response
+        .headers_mut()
+        .insert("location", HeaderValue::from_static("/"));
+    response
+        .headers_mut()
+        .insert("set-cookie", state.cookie(&state.auth.token(), 12 * 3600));
+    Ok(response)
+}
+
+#[cfg(test)]
+mod iam_tests {
+    use super::*;
+    #[test]
+    fn headers_require_enabled_secret_and_owner_identity() {
+        let key = "test-only-proxy-key-with-at-least-32-characters";
+        let mut headers = HeaderMap::new();
+        headers.insert("x-iam-user", HeaderValue::from_static("krahsu"));
+        headers.insert("x-iam-groups", HeaderValue::from_static("owner"));
+        assert!(!valid_iam_headers(&headers, Some(key)));
+        headers.insert("x-iam-key", HeaderValue::from_static(key));
+        assert!(!valid_iam_headers(&headers, None));
+        assert!(valid_iam_headers(&headers, Some(key)));
+        headers.insert("x-iam-user", HeaderValue::from_static("visitor"));
+        assert!(!valid_iam_headers(&headers, Some(key)));
+    }
+}
 async fn health(State(state): State<AppState>) -> Json<Value> {
     Json(json!({"ok":true,"revision":state.revision,"backend":"rust"}))
 }
@@ -286,6 +339,7 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
 fn app(state: AppState, public: PathBuf) -> Router {
     Router::new()
         .route("/api/schedule", get(read_schedule).put(save_schedule))
+        .route("/api/iam/login", get(iam_login))
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/healthz", get(health))

@@ -5,6 +5,7 @@ import Modal from './components/Modal.vue';
 import ScheduleView from './components/ScheduleView.vue';
 import CourseEditor from './components/CourseEditor.vue';
 import SettingsEditor from './components/SettingsEditor.vue';
+const iamEnabled = ref(false);
 const data = ref(null), revision = ref(0), authenticated = ref(false), selectedWeek = ref(1);
 const view = ref(globalThis.matchMedia?.('(max-width:700px)').matches ? 'list' : 'week');
 const preview = ref(false), modal = ref(''), selected = ref(null), busy = ref(false), error = ref(''), password = ref('');
@@ -51,7 +52,7 @@ async function load(initial = false) {
   try {
     const result = await api('schedule');
     if (!active || preview.value || modal.value || revision.value !== before) return;
-    data.value = result.data; revision.value = result.revision; authenticated.value = result.authenticated;
+    data.value = result.data; revision.value = result.revision; authenticated.value = result.authenticated; iamEnabled.value = Boolean(result.iamEnabled);
     clock.value = new Date(); selectedWeek.value = initial ? currentWeek.value : Math.min(selectedWeek.value, data.value.settings.totalWeeks);
     loadError.value = ''; status.value = '已同步 · ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   } catch (err) { status.value = data.value ? '连接中断 · 当前为已加载的课表' : '未连接'; loadError.value = err.message; }
@@ -110,7 +111,7 @@ onUnmounted(() => { active = false; clearInterval(timer); clearTimeout(toastTime
     <CourseEditor v-if="modal === 'course'" :course="selected" :total-weeks="data.settings.totalWeeks" :busy="busy" :error="error" @save="saveCourse" @delete="deleteCourse" @close="close" />
     <SettingsEditor v-else-if="modal === 'settings'" :settings="data.settings" :busy="busy" :error="error" @save="saveSettings" @close="close" @export="exportData" @import="importData" />
     <template v-else-if="modal === 'detail'"><div class="dialog-heading"><p class="eyebrow">COURSE NOTES</p><button class="icon-button" aria-label="关闭" @click="close">×</button></div><h2>{{ selected.name }}</h2><p class="detail-subtitle">{{ [selected.location, selected.teacher].filter(Boolean).join(' · ') }}</p><div v-for="(s, i) in selected.sessions" :key="i" class="detail-session">{{ weekdays[s.day - 1] }} · {{ s.start }}–{{ s.end }}<small>第 {{ s.weeks }} 周 · {{ s.location || selected.location || '地点待填写' }}</small></div><p v-if="!selected.sessions.length" class="subtle">时间待定，请以授课教师或开课单位通知为准。</p><dl v-if="selected.notes"><dt>备注</dt><dd class="notes"><template v-for="(part, i) in notes" :key="i"><a v-if="part.link" :href="part.text" target="_blank" rel="noopener noreferrer">{{ part.text }}</a><template v-else>{{ part.text }}</template></template></dd></dl><div class="dialog-actions"><span></span><button v-if="!preview" class="primary" @click="edit(selected)">编辑课程</button></div></template>
-    <form v-else-if="modal === 'login'" id="login-form" @submit.prevent="login"><div class="dialog-heading"><div><p class="eyebrow">JUST FOR YOU</p><h2>进入编辑</h2></div><button type="button" class="icon-button" aria-label="关闭" @click="close">×</button></div><p class="field-help">输入你的课表密码，在任何设备上管理同一份课程安排。</p><label>课表密码<input v-model="password" type="password" autocomplete="current-password" required></label><p class="form-error" role="alert">{{ error }}</p><div class="dialog-actions"><span></span><button type="submit" class="primary" :disabled="busy">{{ busy ? '验证中…' : '继续 →' }}</button></div></form>
+    <form v-else-if="modal === 'login'" id="login-form" @submit.prevent="login"><div class="dialog-heading"><div><p class="eyebrow">JUST FOR YOU</p><h2>进入编辑</h2></div><button type="button" class="icon-button" aria-label="关闭" @click="close">×</button></div><p v-if="iamEnabled" class="field-help"><a class="secondary" href="/api/iam/login">使用归一账号登录 ↗</a></p><p class="field-help">输入你的课表密码，在任何设备上管理同一份课程安排。</p><label>课表密码<input v-model="password" type="password" autocomplete="current-password" required></label><p class="form-error" role="alert">{{ error }}</p><div class="dialog-actions"><span></span><button type="submit" class="primary" :disabled="busy">{{ busy ? '验证中…' : '继续 →' }}</button></div></form>
     <template v-else-if="modal === 'week'"><div class="dialog-heading"><h2>选择周次</h2><button class="icon-button" aria-label="关闭" @click="close">×</button></div><div id="weeks-grid"><button v-for="w in data.settings.totalWeeks" :key="w" :class="{ selected: w === selectedWeek }" @click="selectedWeek = w; close()">第 {{ w }} 周</button></div></template>
   </Modal><div v-if="message" id="toast" role="status">{{ message }}</div>
 </template>
