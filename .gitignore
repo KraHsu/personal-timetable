@@ -1,0 +1,11 @@
+data/
+__pycache__/
+*.pyc
+.credentials/
+node_modules/
+release.tar.gz
+REVISION
+.release/
+*.sqlite3*
+.env
+.env.*

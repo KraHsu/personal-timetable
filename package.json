@@ -1,0 +1,13 @@
+{
+  "name": "personal-timetable",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A quiet personal timetable, self-hosted on rain",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node tests/core.test.mjs && node tests/ui.test.mjs",
+    "check": "node --check public/app.mjs && node --check public/core.mjs && python3 -m py_compile server.py deploy/receive.py"
+  },
+  "devDependencies": { "jsdom": "28.1.0" }
+}
