@@ -89,6 +89,17 @@ class ServerTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 server.validate(bad)
 
+    def test_pending_course_and_session_location_round_trip(self):
+        data = self.call()[2]['data']
+        data['courses'] = [{'id': 'pending', 'name': '时间待定课程', 'location': '', 'teacher': '测试教师', 'notes': '等待通知', 'color': 'blue', 'sessions': []}]
+        self.assertEqual(server.validate(data), data)
+        session = {'day': 1, 'start': '08:00', 'end': '09:35', 'weeks': '1-2', 'location': '线上教室'}
+        data['courses'][0]['sessions'] = [session]
+        self.assertEqual(server.validate(data), data)
+        session['location'] = {'invalid': True}
+        with self.assertRaises(ValueError):
+            server.validate(data)
+
 
 if __name__ == '__main__':
     unittest.main()

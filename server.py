@@ -90,8 +90,8 @@ def validate(data):
         color = c.get('color')
         if color not in ('green', 'blue', 'mauve', 'peach', 'rose'):
             raise ValueError('课程标记颜色无效')
-        if not isinstance(c.get('sessions'), list) or not 1 <= len(c['sessions']) <= 30:
-            raise ValueError('每门课程须有 1–30 个上课时段')
+        if not isinstance(c.get('sessions'), list) or len(c['sessions']) > 30:
+            raise ValueError('每门课程最多支持 30 个上课时段；时间待定时可不填')
         sessions = []
         for item in c['sessions']:
             if not isinstance(item, dict) or type(item.get('day')) is not int or not 1 <= item['day'] <= 7:
@@ -100,7 +100,10 @@ def validate(data):
             if a >= b:
                 raise ValueError('结束时间须晚于开始时间')
             weeks(item.get('weeks'), total)
-            sessions.append(dict(day=item['day'], start=a, end=b, weeks=item['weeks'].strip()))
+            session = dict(day=item['day'], start=a, end=b, weeks=item['weeks'].strip())
+            if 'location' in item:
+                session['location'] = text_field(item, 'location', 120)
+            sessions.append(session)
         courses.append(dict(id=cid, name=text_field(c, 'name', 80, True), location=text_field(c, 'location', 120), teacher=text_field(c, 'teacher', 80), notes=text_field(c, 'notes', 2000), color=color, sessions=sessions))
     return dict(settings=settings, courses=courses)
 

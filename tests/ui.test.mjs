@@ -19,10 +19,13 @@ test('page flow: login, create multi-session course, show detail, preview and re
  assert.match($('#schedule').textContent,/新的学期/);$('#add-course').click();assert.equal($('#login-dialog').open,true);
  $('#login-form').elements.password.value='test-password';submit($('#login-form'));await new Promise(r=>setImmediate(r));
  assert.equal($('#course-dialog').open,true);const f=$('#course-form');f.elements.name.value='<b>线性代数</b>';f.elements.location.value='A302';$('#add-session').click();assert.equal($('#sessions').children.length,2);
- const second=$('#sessions').children[1];second.querySelector('.session-day').value='3';second.querySelector('.session-weeks').value='1-16单';submit(f);await new Promise(r=>setImmediate(r));
+ const second=$('#sessions').children[1];second.querySelector('.session-day').value='3';second.querySelector('.session-weeks').value='1-16单';second.querySelector('.session-location').value='线上教室';submit(f);await new Promise(r=>setImmediate(r));
  assert.equal(data.courses.length,1);assert.equal(data.courses[0].sessions.length,2);assert.equal($('#course-dialog').open,false);assert.equal($('#course-list b'),null);
- $('#course-list [data-course]').click();assert.equal($('#detail-title').textContent,'<b>线性代数</b>');$('#detail-dialog .close').click();
+ assert.equal(data.courses[0].sessions[1].location,'线上教室');
+ $('#course-list [data-course]').click();assert.equal($('#detail-title').textContent,'<b>线性代数</b>');assert.match($('#detail-content').textContent,/线上教室/);$('#detail-dialog .close').click();
  $('#preview-button').click();assert.equal(document.querySelectorAll('.course-index-item').length,6);$('#preview-button').click();assert.equal(document.querySelectorAll('.course-index-item').length,1);assert.equal(data.courses.length,1);
  $('#settings-button').click();assert.equal($('#settings-dialog').open,true);assert.equal($('#settings-form').elements.title.value,'测试学期');$('#settings-dialog .close').click();$('#list-view').click();assert.equal($('#list-view').getAttribute('aria-pressed'),'true');
+ $('#add-course').click();f.elements.name.value='未排课程';$('#sessions .remove-session').click();assert.equal($('#sessions').children.length,0);submit(f);await new Promise(r=>setImmediate(r));assert.equal(data.courses.length,2);assert.deepEqual(data.courses[1].sessions,[]);assert.match($('#course-list').textContent,/时间待定/);
+ document.querySelectorAll('#course-list [data-course]')[1].click();assert.match($('#detail-content').textContent,/时间待定/);$('#edit-course').click();assert.equal($('#sessions').children.length,0);$('#course-dialog .close').click();
  timers.forEach(t=>{clearTimeout(t);clearInterval(t)});globalThis.setInterval=nativeSetInterval;globalThis.setTimeout=nativeSetTimeout;dom.window.close();
 });

@@ -23,3 +23,10 @@ test('week selection and overlapping lanes retain all occurrences',()=>{
  const result=lanes([s('1','08:00','11:00'),s('1','09:00','10:00'),s('1','10:00','12:00'),s('1','12:00','13:00')]);
  assert.deepEqual(result.map(x=>[x.lane,x.laneCount]),[[0,2],[1,2],[1,2],[0,1]]);
 });
+test('each week uses its session location and unscheduled courses create no events',()=>{
+ const data={settings:{startDate:'2026-09-21',totalWeeks:20},courses:[{name:'A',location:'教室',sessions:[s('1-2'),{...s('3'),location:'线上'}]},{name:'待定课程',sessions:[]}]};
+ assert.equal(occurrences(data,1)[0].location,'教室');
+ assert.equal(occurrences(data,3)[0].location,'线上');
+ assert.equal(occurrences(data,4).length,0);
+ assert.equal(conflicts(data.courses,20).length,0);
+});

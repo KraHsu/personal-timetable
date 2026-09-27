@@ -21,7 +21,7 @@ export function dateInZone(zone, now = new Date()) {
 }
 export function weekOf(start, date) { return Math.floor((Date.parse(date+'T00:00:00Z')-Date.parse(start+'T00:00:00Z')) / 604800000)+1; }
 export function occurrences(data, week) {
-  return data.courses.flatMap(c=> c.sessions.filter(s=>parseWeeks(s.weeks,data.settings.totalWeeks).includes(week)).map(s=>({...s, course:c, date:addDays(data.settings.startDate,(week-1)*7+s.day-1)}))).sort((a,b)=>a.day-b.day || minutes(a.start)-minutes(b.start));
+  return data.courses.flatMap(c=> c.sessions.filter(s=>parseWeeks(s.weeks,data.settings.totalWeeks).includes(week)).map(s=>({...s, location:s.location||c.location, course:c, date:addDays(data.settings.startDate,(week-1)*7+s.day-1)}))).sort((a,b)=>a.day-b.day || minutes(a.start)-minutes(b.start));
 }
 export function conflicts(courses, total) {
   const all=courses.flatMap(c=>c.sessions.map(s=>({...s,name:c.name,active:parseWeeks(s.weeks,total)}))), found=[];
