@@ -1,0 +1,8 @@
+#!/bin/sh
+# Keep the Python fallback only for rolling back pre-migration releases.
+set -eu
+release=/home/charles/apps/timetable/current
+if [ -x "$release/timetable-server" ]; then
+    exec "$release/timetable-server" "$@"
+fi
+exec /usr/bin/python3 "$release/server.py" "$@"

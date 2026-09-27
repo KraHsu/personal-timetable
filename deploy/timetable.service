@@ -9,7 +9,7 @@ Group=charles
 WorkingDirectory=/home/charles/apps/timetable/current
 Environment=TIMETABLE_DATA=/home/charles/apps/timetable/data
 Environment=TIMETABLE_ORIGIN=https://timetable.krahsu.top
-ExecStart=/usr/bin/python3 /home/charles/apps/timetable/current/server.py --port 8765
+ExecStart=/usr/local/libexec/timetable-launch --port 8765
 Restart=on-failure
 RestartSec=3
 UMask=0077

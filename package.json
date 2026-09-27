@@ -1,13 +1,26 @@
 {
   "name": "personal-timetable",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "A quiet personal timetable, self-hosted on rain",
   "type": "module",
-  "engines": { "node": ">=24" },
-  "scripts": {
-    "test": "node tests/core.test.mjs && node tests/ui.test.mjs",
-    "check": "node --check public/app.mjs && node --check public/core.mjs && python3 -m py_compile server.py deploy/receive.py"
+  "engines": {
+    "node": ">=24"
   },
-  "devDependencies": { "jsdom": "28.1.0" }
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "node tests/core.test.mjs && vitest run",
+    "check": "cargo fmt --check && cargo clippy --locked -- -D warnings"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.9",
+    "@vue/test-utils": "^2.5.1",
+    "jsdom": "28.1.0",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
+  },
+  "dependencies": {
+    "vue": "^3.5.43"
+  }
 }

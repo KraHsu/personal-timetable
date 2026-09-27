@@ -13,10 +13,13 @@ spec.loader.exec_module(receiver)
 SHA = 'a' * 40
 
 
-def archive(extra=None, revision=SHA):
+def archive(extra=None, revision=SHA, rust=True):
     stream = io.BytesIO()
     files = {'server.py': b'# Valid Python source\n', 'REVISION': revision.encode()}
     files.update({'public/' + name: b'fixture' for name in receiver.PUBLIC})
+    if rust:
+        files = {'timetable-server': b'\x7fELF\x02\x01' + b'\x00' * 12 + b'\x3e\x00', 'REVISION': revision.encode()}
+        files.update({'public/' + name: b'fixture' for name in ['index.html', 'icon.svg', 'serif.woff2', 'font-license.txt', 'assets/index-test.js', 'assets/index-test.css']})
     with tarfile.open(fileobj=stream, mode='w:gz') as bundle:
         for name, value in files.items():
             item = tarfile.TarInfo(name)
@@ -41,6 +44,13 @@ class DeployTest(unittest.TestCase):
                 receiver.extract(archive(extra=item), Path(directory), SHA)
         with tempfile.TemporaryDirectory() as directory, self.assertRaises(ValueError):
             receiver.extract(archive(revision='b' * 40), Path(directory), SHA)
+
+    def test_rust_binary_permissions_and_legacy_rollback_artifact(self):
+        for rust in [True, False]:
+            with tempfile.TemporaryDirectory() as directory:
+                receiver.extract(archive(rust=rust), Path(directory), SHA)
+                if rust:
+                    self.assertEqual((Path(directory) / 'timetable-server').stat().st_mode & 0o777, 0o755)
 
     def exercise(self, succeeds):
         with tempfile.TemporaryDirectory() as directory:

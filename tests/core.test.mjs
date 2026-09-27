@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseWeeks,weekOf,dateInZone,addDays,occurrences,conflicts,lanes} from '../public/core.mjs';
+import {parseWeeks,weekOf,dateInZone,addDays,occurrences,conflicts,lanes} from '../web/src/core.mjs';
 test('week expressions include odd/even, gaps and Chinese punctuation',()=>{
  assert.deepEqual(parseWeeks('1-8单，10，12-16双',20),[1,3,5,7,10,12,14,16]);
  for(const value of ['0','5-2','1-21','1,,2','2单','1-3x'])assert.throws(()=>parseWeeks(value,20));

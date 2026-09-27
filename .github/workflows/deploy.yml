@@ -16,8 +16,8 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,25 +27,43 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: npm ci --ignore-scripts
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
       - run: npm run check
       - run: npm test
+      - run: npm run build
+      - run: cargo test --locked
+      - run: cargo build --release --locked
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Package compiled application (no data or credentials)
+        run: |
+          mkdir -p .release
+          cp target/release/timetable-server .release/
+          cp -a dist .release/public
+          printf '%s\n' "$GITHUB_SHA" > .release/REVISION
+          tar -C .release -czf release.tar.gz timetable-server public REVISION
+      - uses: actions/upload-artifact@v4
+        with:
+          name: timetable-release
+          path: release.tar.gz
+          retention-days: 7
 
   deploy:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment:
       name: production
       url: https://timetable.krahsu.top
     steps:
-      - uses: actions/checkout@v4
-      - name: Package application (no data or credentials)
-        run: |
-          printf '%s\n' "$GITHUB_SHA" > REVISION
-          tar -czf release.tar.gz server.py public REVISION
+      - uses: actions/download-artifact@v4
+        with:
+          name: timetable-release
       - name: Configure deployment SSH
         env:
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
@@ -77,7 +95,7 @@ jobs:
           python3 - <<'PY'
           import json, os
           health = json.load(open('health.json'))
-          assert health['ok'] and health['revision'] == os.environ['GITHUB_SHA'], health
+          assert health['ok'] and health['backend'] == 'rust' and health['revision'] == os.environ['GITHUB_SHA'], health
           print('HTTPS serves commit', health['revision'])
           PY
       - name: Remove runner credentials

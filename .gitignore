@@ -9,3 +9,6 @@ REVISION
 *.sqlite3*
 .env
 .env.*
+
+target/
+dist/

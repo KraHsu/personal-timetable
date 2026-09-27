@@ -21,8 +21,8 @@ import time
 import urllib.request
 
 BASE = Path('/home/charles/apps/timetable')
-MAX_ARCHIVE = 8 * 1024 * 1024
-MAX_EXPANDED = 16 * 1024 * 1024
+MAX_ARCHIVE = 32 * 1024 * 1024
+MAX_EXPANDED = 64 * 1024 * 1024
 PUBLIC = {'index.html', 'style.css', 'app.mjs', 'core.mjs', 'icon.svg', 'serif.woff2', 'font-license.txt'}
 
 
@@ -39,9 +39,9 @@ def extract(archive, target, revision):
     with tarfile.open(fileobj=io.BytesIO(archive), mode='r:gz') as bundle:
         for item in bundle:
             name = item.name.removeprefix('./').rstrip('/')
-            if item.isdir() and name in ('public', ''):
+            if item.isdir() and name in ('public', 'public/assets', ''):
                 continue
-            allowed = name in {'server.py', 'REVISION'} or (PurePosixPath(name).parent == PurePosixPath('public') and PurePosixPath(name).name in PUBLIC)
+            allowed = name in {'server.py', 'timetable-server', 'REVISION'} or (PurePosixPath(name).parent == PurePosixPath('public') and PurePosixPath(name).name in PUBLIC) or re.fullmatch(r'public/assets/[A-Za-z0-9_-]+\.(?:js|css)', name)
             if not allowed or not item.isfile() or name in seen:
                 raise ValueError(f'Invalid release entry: {name}')
             seen.add(name)
@@ -53,12 +53,24 @@ def extract(archive, target, revision):
             with bundle.extractfile(item) as source, path.open('xb') as out:
                 shutil.copyfileobj(source, out)
             path.chmod(0o644)
-    expected = {'server.py', 'REVISION'} | {'public/' + name for name in PUBLIC}
-    if seen != expected:
-        raise ValueError('Release is missing required application files')
+    if 'timetable-server' in seen:
+        required = {'timetable-server', 'REVISION', 'public/index.html', 'public/icon.svg', 'public/serif.woff2', 'public/font-license.txt'}
+        assets = {name for name in seen if name.startswith('public/assets/')}
+        if seen != required | assets or not any(x.endswith('.js') for x in assets) or not any(x.endswith('.css') for x in assets):
+            raise ValueError('Release is missing required Rust/Vue files')
+        binary = target / 'timetable-server'
+        with binary.open('rb') as stream:
+            header = stream.read(20)
+        if len(header) != 20 or header[:6] != b'\x7fELF\x02\x01' or header[18:20] != b'\x3e\x00':
+            raise ValueError('Expected a Linux x86_64 ELF executable')
+        binary.chmod(0o755)
+    else:
+        expected = {'server.py', 'REVISION'} | {'public/' + name for name in PUBLIC}
+        if seen != expected:
+            raise ValueError('Release is missing required application files')
+        compile((target / 'server.py').read_text(), 'server.py', 'exec')
     if (target / 'REVISION').read_text().strip() != revision:
         raise ValueError('Release revision does not match requested commit')
-    compile((target / 'server.py').read_text(), 'server.py', 'exec')
 
 
 def health(revision):
