@@ -92,4 +92,4 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 
 HTTP 测试启动编译后的 Rust 程序，使用 Python 旧格式生成的临时数据库、密码和 Cookie，验证升级兼容、保存、重启、并发版本保护、访问限制及速率限制。测试不使用真实课表。
 
-字体为 Noto Serif CJK SC 界面文字子集，许可见 `web/public/font-license.txt`；其余文字回退到系统衬线字体。
+字体为同源托管的 Noto Serif SC 可变字体，使用 Unicode 范围按需加载分片，并包含上游完整的 30,928 个字符；不再按界面文案裁剪字形。许可见 `web/public/font-license.txt`。

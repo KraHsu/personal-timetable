@@ -19,7 +19,7 @@ def archive(extra=None, revision=SHA, rust=True):
     files.update({'public/' + name: b'fixture' for name in receiver.PUBLIC})
     if rust:
         files = {'timetable-server': b'\x7fELF\x02\x01' + b'\x00' * 12 + b'\x3e\x00', 'REVISION': revision.encode()}
-        files.update({'public/' + name: b'fixture' for name in ['index.html', 'icon.svg', 'serif.woff2', 'font-license.txt', 'assets/index-test.js', 'assets/index-test.css']})
+        files.update({'public/' + name: b'fixture' for name in ['index.html', 'icon.svg', 'serif.woff2', 'font-license.txt', 'assets/index-test.js', 'assets/index-test.css', 'assets/font-test.woff2']})
     with tarfile.open(fileobj=stream, mode='w:gz') as bundle:
         for name, value in files.items():
             item = tarfile.TarInfo(name)
