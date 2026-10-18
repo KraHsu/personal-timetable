@@ -19,6 +19,36 @@ beforeEach(() => {
 });
 afterEach(() => { wrapper?.unmount(); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 describe('Vue timetable', () => {
+  it('opens the map without login, zooms it and returns to the course details', async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback) { this.callback = callback; }
+      observe(element) {
+        Object.defineProperties(element, { clientWidth: { value: 600 }, clientHeight: { value: 400 } });
+        this.callback();
+      }
+      disconnect() {}
+    });
+    await start();
+    expect(wrapper.find('.map-viewport').exists()).toBe(false);
+    await wrapper.find('#map-button').trigger('click');
+    expect(wrapper.find('dialog').attributes('aria-label')).toBe('校园地图');
+    expect(wrapper.find('#login-form').exists()).toBe(false);
+    expect(wrapper.find('.map-tools a').attributes('href')).toMatch(/campus-map\.pdf$/);
+    const width = parseFloat(wrapper.find('.map-stage img').element.style.width);
+    await wrapper.find('[aria-label="放大地图"]').trigger('click');
+    expect(parseFloat(wrapper.find('.map-stage img').element.style.width)).toBeCloseTo(width * 1.5);
+    await button('全图').trigger('click');
+    expect(parseFloat(wrapper.find('.map-stage img').element.style.width)).toBeCloseTo(width);
+    await wrapper.find('[aria-label="关闭地图"]').trigger('click');
+    expect(wrapper.find('dialog').exists()).toBe(false);
+    await wrapper.find('.course-index-item').trigger('click');
+    await button('查看校园地图').trigger('click');
+    await wrapper.find('dialog').trigger('cancel');
+    expect(wrapper.find('dialog').attributes('aria-label')).toBe('课程详情');
+    expect(wrapper.find('dialog').text()).toContain('A201');
+    expect(authenticated).toBe(false);
+    expect(saved).toEqual(fixture());
+  });
   it('renders escaped course names, pending courses and location overrides in both views', async () => {
     await start();
     expect(wrapper.text()).toContain('<img src=x onerror=alert(1)>');

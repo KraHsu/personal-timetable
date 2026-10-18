@@ -7,3 +7,7 @@ dialog{padding:30px;width:calc(100% - 32px);max-width:560px;max-height:90dvh;ove
 @media(prefers-reduced-motion:no-preference){button,a{transition:color .16s,background .16s}dialog[open]{animation:appear .18s ease-out}@keyframes appear{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}}
 
 #sessions:empty::before{content:"尚未安排上课时间。课程将保留在「我的课程」中。";display:block;padding:16px 0 24px;font-size:12px;color:var(--muted)}
+
+/* The campus map keeps its original colors in both themes. */
+dialog.map-dialog{max-width:1180px}
+@media(max-width:400px){.masthead nav{gap:9px}.masthead nav .text-button{font-size:12px}.wordmark{gap:7px}}

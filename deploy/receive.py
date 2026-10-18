@@ -41,7 +41,7 @@ def extract(archive, target, revision):
             name = item.name.removeprefix('./').rstrip('/')
             if item.isdir() and name in ('public', 'public/assets', ''):
                 continue
-            allowed = name in {'server.py', 'timetable-server', 'REVISION'} or (PurePosixPath(name).parent == PurePosixPath('public') and PurePosixPath(name).name in PUBLIC) or re.fullmatch(r'public/assets/[A-Za-z0-9_-]+\.(?:js|css|woff2)', name)
+            allowed = name in {'server.py', 'timetable-server', 'REVISION'} or (PurePosixPath(name).parent == PurePosixPath('public') and PurePosixPath(name).name in PUBLIC) or re.fullmatch(r'public/assets/[A-Za-z0-9_-]+\.(?:js|css|woff2|pdf|webp)', name)
             if not allowed or not item.isfile() or name in seen:
                 raise ValueError(f'Invalid release entry: {name}')
             seen.add(name)

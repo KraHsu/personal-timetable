@@ -19,7 +19,7 @@ def archive(extra=None, revision=SHA, rust=True):
     files.update({'public/' + name: b'fixture' for name in receiver.PUBLIC})
     if rust:
         files = {'timetable-server': b'\x7fELF\x02\x01' + b'\x00' * 12 + b'\x3e\x00', 'REVISION': revision.encode()}
-        files.update({'public/' + name: b'fixture' for name in ['index.html', 'icon.svg', 'serif.woff2', 'font-license.txt', 'assets/index-test.js', 'assets/index-test.css', 'assets/font-test.woff2']})
+        files.update({'public/' + name: b'fixture' for name in ['index.html', 'icon.svg', 'serif.woff2', 'font-license.txt', 'assets/index-test.js', 'assets/index-test.css', 'assets/font-test.woff2', 'assets/campus-map-test.pdf', 'assets/campus-map-test.webp']})
     with tarfile.open(fileobj=stream, mode='w:gz') as bundle:
         for name, value in files.items():
             item = tarfile.TarInfo(name)
@@ -36,7 +36,7 @@ class DeployTest(unittest.TestCase):
         for command in ['bash', 'deploy ' + SHA + '; id', 'deploy ../data', 'deploy ' + SHA + '\n']:
             with self.assertRaises(ValueError):
                 receiver.release_id(command)
-        for name, kind in [('../data/auth.json', tarfile.REGTYPE), ('public/index.html', tarfile.SYMTYPE), ('data/schedule.sqlite3', tarfile.REGTYPE)]:
+        for name, kind in [('../data/auth.json', tarfile.REGTYPE), ('public/index.html', tarfile.SYMTYPE), ('data/schedule.sqlite3', tarfile.REGTYPE), ('public/assets/script.py', tarfile.REGTYPE)]:
             item = tarfile.TarInfo(name)
             item.type = kind
             item.linkname = '/etc/passwd'
