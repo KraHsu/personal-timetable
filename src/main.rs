@@ -1,5 +1,6 @@
 mod auth;
 mod model;
+mod reminders;
 
 use auth::{Auth, now};
 use axum::{
@@ -65,6 +66,12 @@ impl AppState {
         db.execute_batch("PRAGMA journal_mode=WAL;
           CREATE TABLE IF NOT EXISTS schedule (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, body TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS history (revision INTEGER PRIMARY KEY, saved_at TEXT DEFAULT CURRENT_TIMESTAMP, body TEXT NOT NULL);")?;
+        db.execute_batch("CREATE TABLE IF NOT EXISTS reminders (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, body TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS notification_deliveries (key TEXT PRIMARY KEY, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0, sent_at TEXT, title TEXT NOT NULL);")?;
+        db.execute(
+            "INSERT OR IGNORE INTO reminders VALUES (1,1,?1)",
+            [serde_json::to_string(&reminders::ReminderConfig::default())?],
+        )?;
         db.execute(
             "INSERT OR IGNORE INTO schedule VALUES (1, 1, ?1)",
             [serde_json::to_string(&Schedule::empty())?],
@@ -339,6 +346,7 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
 fn app(state: AppState, public: PathBuf) -> Router {
     Router::new()
         .route("/api/schedule", get(read_schedule).put(save_schedule))
+        .route("/api/reminders", get(reminders::read).put(reminders::save))
         .route("/api/iam/login", get(iam_login))
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))

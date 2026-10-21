@@ -95,3 +95,28 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 HTTP 测试启动编译后的 Rust 程序，使用 Python 旧格式生成的临时数据库、密码和 Cookie，验证升级兼容、保存、重启、并发版本保护、访问限制及速率限制。测试不使用真实课表。
 
 字体为同源托管的 Noto Serif SC 可变字体，使用 Unicode 范围按需加载分片，并包含上游完整的 30,928 个字符；不再按界面文案裁剪字形。许可见 `web/public/font-license.txt`。
+
+## Server酱³ 提醒与事项
+
+主页「事项与提醒」沿用现有编辑登录，事项内容只向已登录用户提供。可以开关课程提醒、添加作业/考试/其他事项，填写名称、可选的事项时间、独立的提醒时间和备注，并编辑、完成、恢复或删除事项。所有时间均使用课表时区；提醒与事项截止时间可以任意分开设置。完成或停用事项后不再推送。
+
+每门课程首次开课的前一周周五默认 18:00 推送新课提醒，支持独立开关和在线修改周五提醒时间。首次日期取全部时段与有效周次中的最早日期，未排课的课程不推送。新课提醒允许 24 小时内补发。
+
+课程默认在实际开课前 30 分钟推送，尊重学期、周次、单双周和独立教室。服务器每 30 秒检查一次，无需保持网页打开。正常情况下推送误差约 30 秒；网络失败使用退避重试。课程只在开课前补发，事项在提醒时间后的 24 小时内补发，超过窗口不再发送。SQLite 的 `notification_deliveries` 记录发送结果，重启不会重复发送成功的提醒；网络响应丢失等不确定故障仍可能重复送达。修改事项提醒时间会生成一次新提醒。
+
+Server3 密钥存放在 root 专用的 `/etc/timetable-notify.env`：
+
+```text
+SERVERCHAN3_SENDKEY=你的Server3密钥
+```
+
+密钥不进入页面、API 或仓库。`timetable-notify.service` 以 charles 身份运行，systemd 读取此环境文件。提醒配置、事项和发送记录均在原 SQLite 数据库中，随现有部署的 SQLite backup 一起备份；课表 JSON 导出不包含事项。
+
+首次上线时，先部署新应用以创建数据表，再上传 `deploy/` 并执行 `bash deploy/install-notifications.sh`。没有独立配置时，该脚本仅从 `/etc/cert-monitor.env` 复制 `SERVERCHAN3_SENDKEY`，权限为 0600。后续修改 worker 或 timer 时重新运行此安装脚本；普通应用自动部署保留提醒服务。
+
+```bash
+ssh rain 'systemctl status timetable-notify.timer --no-pager'
+ssh rain 'sudo journalctl -u timetable-notify.service -n 30 --no-pager'
+```
+
+服务时区建议在配置事项前设定；修改课表时区后，已有事项的填写时间会按新时区解释。夏令时跳过的无效本地时间会跳过并记日志，重复的本地时间取第一次。

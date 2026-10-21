@@ -1,0 +1,21 @@
+[Unit]
+Description=Timetable Server3 course and personal reminders
+After=network-online.target timetable.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=charles
+Group=charles
+Environment=TIMETABLE_DATA=/home/charles/apps/timetable/data
+EnvironmentFile=/etc/timetable-notify.env
+ExecStart=/usr/bin/python3 /usr/local/libexec/timetable-notify.py
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/charles/apps/timetable/data
+TimeoutStartSec=5min
+MemoryMax=96M
+TasksMax=16

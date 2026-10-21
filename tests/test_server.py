@@ -150,6 +150,30 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.call('POST', '/api/login', raw='x' * 512001)[0], 413)
         self.assertEqual(self.call('POST', '/api/login', raw='{}', extra={'Content-Type': 'text/plain'})[0], 415)
 
+    def test_reminders_private_validation_revision_and_persistence(self):
+        path = '/api/reminders'
+        self.assertEqual(self.call(path=path)[0], 401)
+        self.assertEqual(self.call('PUT', path, {})[0], 401)
+        cookie = self.legacy_cookie()
+        original = self.call(path=path, cookie=cookie)[2]
+        data = {'courseEnabled': True, 'firstCourseEnabled': True, 'firstCourseTime': '18:00', 'items': [{'id': 'homework-one', 'title': '交作业', 'kind': 'homework', 'dueAt': '2026-11-01T23:59', 'remindAt': '2026-10-30T18:00', 'notes': '第二章', 'enabled': True, 'completed': False}]}
+        payload = {'data': data, 'revision': original['revision']}
+        self.assertEqual(self.call('PUT', path, payload, cookie, origin='https://evil.example')[0], 403)
+        self.assertEqual(self.call('PUT', path, payload, cookie)[0], 200)
+        self.assertEqual(self.call('PUT', path, payload, cookie)[0], 409)
+        self.assertEqual(self.call(path=path, cookie=cookie)[2]['data'], data)
+        for field, value in [('remindAt', ''), ('remindAt', '2026-02-30T12:00'), ('kind', 'invalid'), ('id', '../file'), ('title', '')]:
+            bad = copy.deepcopy(data)
+            bad['items'][0][field] = value
+            self.assertEqual(self.call('PUT', path, {'data': bad, 'revision': original['revision'] + 1}, cookie)[0], 400)
+        self.process.terminate()
+        self.process.wait(timeout=10)
+        self.start_server()
+        self.assertEqual(self.call(path=path, cookie=cookie)[2]['data'], data)
+        public = self.call()[2]
+        self.assertNotIn('items', public['data'])
+        self.assertNotIn('SENDKEY', json.dumps(self.call(path=path, cookie=cookie)[2]))
+
     def test_rate_limit(self):
         for _ in range(10):
             self.assertEqual(self.call('POST', '/api/login', {'password': 'wrong'}, extra={'X-Real-IP': '192.0.2.1'})[0], 401)
