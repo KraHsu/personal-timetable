@@ -156,13 +156,13 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.call('PUT', path, {})[0], 401)
         cookie = self.legacy_cookie()
         original = self.call(path=path, cookie=cookie)[2]
-        data = {'courseEnabled': True, 'firstCourseEnabled': True, 'firstCourseTime': '18:00', 'items': [{'id': 'homework-one', 'title': '交作业', 'kind': 'homework', 'dueAt': '2026-11-01T23:59', 'remindAt': '2026-10-30T18:00', 'notes': '第二章', 'enabled': True, 'completed': False}]}
+        data = {'courseEnabled': True, 'firstCourseEnabled': True, 'firstCourseTime': '18:00', 'items': [{'id': 'homework-one', 'title': '交作业', 'kind': 'homework', 'dueAt': '2026-11-01T23:59', 'remindTimes': ['2026-10-30T18:00', '2026-11-01T18:00'], 'notes': '第二章', 'enabled': True, 'completed': False}]}
         payload = {'data': data, 'revision': original['revision']}
         self.assertEqual(self.call('PUT', path, payload, cookie, origin='https://evil.example')[0], 403)
         self.assertEqual(self.call('PUT', path, payload, cookie)[0], 200)
         self.assertEqual(self.call('PUT', path, payload, cookie)[0], 409)
         self.assertEqual(self.call(path=path, cookie=cookie)[2]['data'], data)
-        for field, value in [('remindAt', ''), ('remindAt', '2026-02-30T12:00'), ('kind', 'invalid'), ('id', '../file'), ('title', '')]:
+        for field, value in [('remindTimes', []), ('remindTimes', ['2026-02-30T12:00']), ('remindTimes', ['']), ('remindTimes', [f'2026-11-{d:02d}T12:00' for d in range(1, 22)]), ('kind', 'invalid'), ('id', '../file'), ('title', '')]:
             bad = copy.deepcopy(data)
             bad['items'][0][field] = value
             self.assertEqual(self.call('PUT', path, {'data': bad, 'revision': original['revision'] + 1}, cookie)[0], 400)
@@ -173,6 +173,25 @@ class ServerTest(unittest.TestCase):
         public = self.call()[2]
         self.assertNotIn('items', public['data'])
         self.assertNotIn('SENDKEY', json.dumps(self.call(path=path, cookie=cookie)[2]))
+
+    def test_reminder_single_time_legacy_upgrade_and_completed_without_times(self):
+        path, cookie = '/api/reminders', self.legacy_cookie()
+        config = self.call(path=path, cookie=cookie)[2]
+        item = {'id': 'legacy-reminder', 'title': '旧事项', 'kind': 'other', 'dueAt': '', 'remindAt': '2026-11-01T18:00', 'notes': '', 'enabled': True, 'completed': False}
+        # Simulate the original on-disk format from before this upgrade.
+        raw = copy.deepcopy(config['data'])
+        raw['items'] = [item]
+        with sqlite3.connect(self.data / 'schedule.sqlite3') as db:
+            db.execute('UPDATE reminders SET body=? WHERE id=1', (json.dumps(raw),))
+        upgraded = self.call(path=path, cookie=cookie)[2]
+        self.assertEqual(upgraded['data']['items'][0]['remindTimes'], ['2026-11-01T18:00'])
+        self.assertNotIn('remindAt', upgraded['data']['items'][0])
+        # Old clients can still write a single reminder.
+        self.assertEqual(self.call('PUT', path, {'data': raw, 'revision': upgraded['revision']}, cookie)[0], 200)
+        current = self.call(path=path, cookie=cookie)[2]
+        current['data']['items'][0].update(completed=True, remindTimes=[])
+        self.assertEqual(self.call('PUT', path, current, cookie)[0], 200)
+        self.assertTrue(self.call(path=path, cookie=cookie)[2]['data']['items'][0]['completed'])
 
     def test_rate_limit(self):
         for _ in range(10):

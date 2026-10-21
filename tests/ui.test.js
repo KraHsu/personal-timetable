@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils';
 import App from '../web/src/App.vue';
 const fixture = () => ({ settings: { title: '测试学期', startDate: '2026-09-21', totalWeeks: 20, timezone: 'Asia/Shanghai', dayStart: '08:00', dayEnd: '20:00' }, courses: [{ id: 'one', name: '<img src=x onerror=alert(1)>', location: 'A201', teacher: '老师', notes: 'https://example.com 备忘', color: 'blue', sessions: [{ day: 1, start: '08:00', end: '09:35', weeks: '1-20', location: '线上' }] }, { id: 'pending', name: '待定课程', location: '', teacher: '', notes: '', color: 'green', sessions: [] }] });
 let wrapper, saved, authenticated, revision, reminders, reminderRevision;
-function button(text) { return wrapper.findAll('button').find(x => x.text() === text); }
+function button(text) { const scope = wrapper.find('dialog').exists() ? wrapper.find('dialog') : wrapper; return scope.findAll('button').find(x => x.text() === text); }
 async function start(auth = false) { authenticated = auth; wrapper = mount(App, { attachTo: document.body }); await flushPromises(); }
 beforeEach(() => {
   saved = fixture(); authenticated = false; revision = 3; reminders = { courseEnabled: true, firstCourseEnabled: true, firstCourseTime: '18:00', items: [] }; reminderRevision = 1;
@@ -40,10 +40,12 @@ describe('Vue timetable', () => {
     await wrapper.find('[name=title]').setValue('期中考试');
     await wrapper.find('[name=kind]').setValue('exam');
     await wrapper.find('[name=dueAt]').setValue('2026-11-10T09:00');
-    await wrapper.find('[name=remindAt]').setValue('2026-11-08T20:15');
+    await wrapper.find('[name=remindTime-0]').setValue('2026-11-08T20:15');
+    await button('＋ 添加提醒时间').trigger('click');
+    await wrapper.find('[name=remindTime-1]').setValue('2026-11-10T08:30');
     await wrapper.find('[name=notes]').setValue('带计算器');
     await wrapper.find('#reminder-form').trigger('submit'); await flushPromises();
-    expect(reminders.items[0]).toMatchObject({ title: '期中考试', kind: 'exam', remindAt: '2026-11-08T20:15', dueAt: '2026-11-10T09:00', enabled: true });
+    expect(reminders.items[0]).toMatchObject({ title: '期中考试', kind: 'exam', remindTimes: ['2026-11-08T20:15', '2026-11-10T08:30'], dueAt: '2026-11-10T09:00', enabled: true });
     expect(wrapper.text()).toContain('带计算器');
     await button('完成').trigger('click'); await flushPromises();
     expect(reminders.items[0].completed).toBe(true);
@@ -52,11 +54,41 @@ describe('Vue timetable', () => {
     await button('删除').trigger('click'); await flushPromises();
     expect(reminders.items).toEqual([]);
   });
+  it('lists all private items on the homepage, filters completed items and edits reminder times', async () => {
+    reminders.items = [
+      { id: 'one', title: '代数作业', kind: 'homework', dueAt: '2026-11-10T23:59', remindAt: '2026-11-09T19:00', notes: '第二章', completed: false, enabled: true },
+      { id: 'two', title: '英语考试', kind: 'exam', dueAt: '', remindTimes: ['2026-11-05T09:00', '2026-11-06T08:00'], notes: '', completed: true, enabled: true }
+    ];
+    await start(true);
+    const list = wrapper.find('#all-items');
+    expect(list.findAll('.reminder-item')).toHaveLength(2);
+    expect(list.text()).toContain('已完成 · 不再提醒');
+    await list.findAll('[aria-label="筛选事项"] button')[2].trigger('click');
+    expect(list.findAll('.reminder-item')).toHaveLength(1);
+    expect(list.text()).toContain('英语考试');
+    await list.find('[aria-label="搜索事项"]').setValue('没有的事项');
+    expect(list.text()).toContain('没有符合条件');
+    await list.find('[aria-label="搜索事项"]').setValue('');
+    await list.findAll('[aria-label="筛选事项"] button')[0].trigger('click');
+    await list.find('[data-item-id="one"] .reminder-actions button').trigger('click'); await flushPromises();
+    expect(wrapper.find('[name=remindTime-0]').element.value).toBe('2026-11-09T19:00');
+    await button('＋ 添加提醒时间').trigger('click');
+    await wrapper.find('[name=remindTime-1]').setValue('2026-11-10T20:00');
+    await wrapper.find('[aria-label="移除第 1 次提醒"]').trigger('click');
+    await wrapper.find('#reminder-form').trigger('submit'); await flushPromises();
+    expect(reminders.items[0].remindTimes).toEqual(['2026-11-10T20:00']);
+    expect(reminders.items[0]).not.toHaveProperty('remindAt');
+    await button('关闭').trigger('click');
+    await list.find('[data-item-id="one"] .reminder-actions button:nth-child(2)').trigger('click'); await flushPromises();
+    expect(reminders.items[0].completed).toBe(true);
+    await button('退出编辑').trigger('click'); await flushPromises();
+    expect(wrapper.find('#all-items').text()).not.toContain('代数作业');
+  });
   it('keeps reminder drafts when another device changes the configuration', async () => {
     await start(true); await wrapper.find('#reminders-button').trigger('click'); await flushPromises();
     await wrapper.find('#add-reminder').trigger('click');
     await wrapper.find('[name=title]').setValue('保留提醒草稿');
-    await wrapper.find('[name=remindAt]').setValue('2026-11-01T12:15');
+    await wrapper.find('[name=remindTime-0]').setValue('2026-11-01T12:15');
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ error: '另一台设备已更新事项' }) })));
     await wrapper.find('#reminder-form').trigger('submit'); await flushPromises();
     expect(wrapper.find('[name=title]').element.value).toBe('保留提醒草稿');

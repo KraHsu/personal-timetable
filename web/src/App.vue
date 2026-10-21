@@ -7,13 +7,16 @@ import ScheduleView from './components/ScheduleView.vue';
 import CourseEditor from './components/CourseEditor.vue';
 import SettingsEditor from './components/SettingsEditor.vue';
 import RemindersEditor from './components/RemindersEditor.vue';
+import ItemList from './components/ItemList.vue';
+import { normalizeReminders } from './reminders.mjs';
+const reminderToEdit = ref(null), reminderLoadError = ref('');
 const reminderConfig = ref(null), reminderRevision = ref(0), lastDelivery = ref(null);
 const iamEnabled = ref(false);
 const data = ref(null), revision = ref(0), authenticated = ref(false), selectedWeek = ref(1);
 const view = ref(globalThis.matchMedia?.('(max-width:700px)').matches ? 'list' : 'week');
 const preview = ref(false), modal = ref(''), selected = ref(null), busy = ref(false), error = ref(''), password = ref('');
 const status = ref('正在读取课表…'), loadError = ref(''), message = ref(''), clock = ref(new Date());
-let realData, pendingAction, timer, toastTimer, mapReturn = '', active = true, loading = false;
+let realData, pendingAction, timer, toastTimer, mapReturn = '', active = true, loading = false, remindersRequest = 0;
 const clone = value => JSON.parse(JSON.stringify(value));
 let savedTheme; try { savedTheme = localStorage.getItem('course-theme'); } catch { /* storage is optional */ }
 const theme = ref(savedTheme || (globalThis.matchMedia?.('(prefers-color-scheme:dark)').matches ? 'dark' : 'light'));
@@ -58,6 +61,7 @@ async function load(initial = false) {
     if (!active || preview.value || modal.value || revision.value !== before) return;
     data.value = result.data; revision.value = result.revision; authenticated.value = result.authenticated; iamEnabled.value = Boolean(result.iamEnabled);
     clock.value = new Date(); selectedWeek.value = initial ? currentWeek.value : Math.min(selectedWeek.value, data.value.settings.totalWeeks);
+    if (authenticated.value) { try { await loadReminders(); } catch (err) { reminderLoadError.value = err.message; } } else { reminderConfig.value = null; }
     loadError.value = ''; status.value = '已同步 · ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   } catch (err) { status.value = data.value ? '连接中断 · 当前为已加载的课表' : '未连接'; loadError.value = err.message; }
   finally { loading = false; }
@@ -68,8 +72,17 @@ async function save(value) {
   status.value = '已保存 · ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); toast('已保存，所有设备都会同步');
 }
 async function perform(action) { if (busy.value) return; busy.value = true; error.value = ''; try { await action(); } catch (err) { error.value = err.message; } finally { busy.value = false; } }
-function openReminders() { requireEdit(() => { open('reminders'); reminderConfig.value = null; perform(async () => { const result = await api('reminders'); reminderConfig.value = result.data; reminderRevision.value = result.revision; lastDelivery.value = result.lastDelivery; }); }); }
-async function saveReminders(config) { await perform(async () => { const result = await api('reminders', { method: 'PUT', body: JSON.stringify({ data: config, revision: reminderRevision.value }) }); reminderConfig.value = result.data; reminderRevision.value = result.revision; toast('提醒设置已保存'); }); }
+async function loadReminders() {
+  const before = reminderRevision.value, request = ++remindersRequest;
+  const result = await api('reminders');
+  if (!active || !authenticated.value || preview.value || request !== remindersRequest || reminderRevision.value !== before) return;
+  reminderConfig.value = normalizeReminders(result.data); reminderRevision.value = result.revision; lastDelivery.value = result.lastDelivery; reminderLoadError.value = '';
+}
+function openReminders(item = null) { requireEdit(() => { reminderToEdit.value = item; open('reminders'); reminderConfig.value = null; perform(loadReminders); }); }
+async function saveReminders(config) { await perform(async () => { const result = await api('reminders', { method: 'PUT', body: JSON.stringify({ data: config, revision: reminderRevision.value }) }); reminderConfig.value = normalizeReminders(result.data); reminderRevision.value = result.revision; toast('事项与提醒已保存'); }); }
+async function toggleItem(item) { await saveReminders({ ...clone(reminderConfig.value), items: reminderConfig.value.items.map(x => x.id === item.id ? { ...x, completed: !x.completed } : x) }); }
+async function deleteItem(item) { await saveReminders({ ...clone(reminderConfig.value), items: reminderConfig.value.items.filter(x => x.id !== item.id) }); }
+
 async function saveCourse(draft) {
   await perform(async () => {
     const course = clone(draft); course.id ||= globalThis.crypto.randomUUID(); course.name = course.name.trim();
@@ -90,7 +103,7 @@ async function saveSettings(settings) { await perform(async () => {
   await save({ ...clone(data.value), settings: clone(settings) }); modal.value = '';
 }); }
 async function login() { let action; await perform(async () => { await api('login', { method: 'POST', body: JSON.stringify({ password: password.value }) }); authenticated.value = true; password.value = ''; modal.value = ''; action = pendingAction; pendingAction = null; }); action?.(); }
-async function logout() { try { await api('logout', { method: 'POST', body: '{}' }); authenticated.value = false; toast('已退出编辑'); } catch (err) { toast(err.message); } }
+async function logout() { try { await api('logout', { method: 'POST', body: '{}' }); authenticated.value = false; reminderConfig.value = null; toast('已退出编辑'); } catch (err) { toast(err.message); } }
 function exportData() { const url = URL.createObjectURL(new Blob([JSON.stringify(data.value, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = `课间-${now.value.date}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
 async function importData(file) { await perform(async () => { if (file.size > 512000) throw new Error('备份文件不能超过 500 KB'); const value = JSON.parse(await file.text()); if (!value.settings || !Array.isArray(value.courses)) throw new Error('这不是有效的课表备份'); if (!confirm(`导入将替换当前的 ${data.value.courses.length} 门课程。建议先导出备份。继续吗？`)) return; await save(value); modal.value = ''; }); }
 function togglePreview() {
@@ -110,13 +123,14 @@ onUnmounted(() => { active = false; clearInterval(timer); clearTimeout(toastTime
   <section class="schedule-section" aria-label="课程安排"><div class="toolbar"><div class="week-nav"><button class="icon-button" aria-label="上一周" :disabled="selectedWeek <= 1" @click="selectedWeek--">←</button><button class="week-title" aria-label="选择周次" @click="open('week')">第 {{ String(selectedWeek).padStart(2, '0') }} 周<span class="chevron">⌄</span></button><button class="icon-button" aria-label="下一周" :disabled="selectedWeek >= data.settings.totalWeeks" @click="selectedWeek++">→</button><button v-if="selectedWeek !== currentWeek" class="today-button" @click="selectedWeek = currentWeek">回到本周</button></div><div class="view-switch" aria-label="视图"><button :aria-pressed="view === 'week'" @click="view = 'week'">周课表</button><button :aria-pressed="view === 'list'" @click="view = 'list'">日程</button></div></div>
   <div class="schedule-meta"><span>{{ start.replaceAll('-', '.') }} — {{ addDays(start, 6).slice(5).replace('-', '.') }}</span><span>{{ items.length }} 节课 · {{ hours }} 小时</span></div><div v-if="preview" class="preview-banner">示例预览 · 以下课程仅用于展示，不会保存到你的课表。</div>
   <ScheduleView :data="data" :items="items" :start="start" :now="now" :view="view" @detail="detail" @add="edit()" /></section>
-  <section class="reminders-entry"><div><p class="eyebrow">STAY ON TRACK</p><h2>作业、考试，还有别忘了的事。</h2><p class="subtle">课程提前半小时，其他事项按你选的时间提醒。</p></div><button id="reminders-button" class="secondary" @click="openReminders">事项与提醒 ↗</button></section>
+  <section class="reminders-entry"><div><p class="eyebrow">STAY ON TRACK</p><h2>作业、考试，还有别忘了的事。</h2><p class="subtle">课程提前半小时，其他事项按你选的时间提醒。</p></div><button id="reminders-button" class="secondary" @click="openReminders()">事项与提醒 ↗</button></section>
+  <section v-if="!preview" id="all-items" class="all-items" aria-label="我的事项"><div class="section-heading"><h2>我的事项 <span v-if="authenticated && reminderConfig">{{ reminderConfig.items.length }}</span></h2><span v-if="authenticated" class="subtle">时间按 {{ data.settings.timezone }}</span></div><p v-if="!authenticated" class="subtle">登录后查看所有作业、考试与其他事项。<button class="text-button" @click="openReminders()">进入查看 ↗</button></p><p v-else-if="reminderLoadError" class="form-error" role="alert">{{ reminderLoadError }}<button class="text-button" @click="openReminders()">重新读取</button></p><template v-else-if="reminderConfig"><p v-if="error && !modal" class="form-error" role="alert">{{ error }}</p><ItemList :items="reminderConfig.items" :busy="busy" @edit="openReminders" @toggle="toggleItem" @delete="deleteItem" /></template><p v-else class="subtle">正在读取事项…</p></section>
   <section class="course-index"><div class="section-heading"><h2>我的课程 <span>{{ String(data.courses.length).padStart(2, '0') }}</span></h2><button id="preview-button" class="text-button" @click="togglePreview">{{ preview ? '返回我的课表 ↗' : '看看示例 ↗' }}</button></div><div v-if="data.courses.length" class="course-index-list"><button v-for="c in data.courses" :key="c.id" class="course-index-item" :style="{ '--course-color': `var(--${c.color})` }" @click="detail(c)"><span class="color-dot"></span><span><strong>{{ c.name }}</strong><small>{{ [!c.sessions.length ? '时间待定' : '', c.teacher, c.location].filter(Boolean).join(' · ') || '未填写课程信息' }}</small></span><span class="arrow">↗</span></button></div><p v-else class="subtle">课程名称、教室、老师和备注，都收在这里。</p></section></template>
   <div v-else-if="loadError" class="empty-state"><h3>暂时没能读到课表</h3><p>{{ loadError }}</p><button class="secondary" @click="load(true)">重新读取</button></div><div v-else class="loading">正在翻开这一周…</div></main>
   <footer><span>课间 <span class="footer-dot">·</span> 一周，一页，从容一点。</span><div><span role="status">{{ status }}</span><button v-if="authenticated" class="text-button" @click="logout">退出编辑</button></div></footer></div>
   <Modal v-if="modal" :key="modal" :class="{ 'map-dialog': modal === 'map' }" :label="({ course: '课程编辑', detail: '课程详情', settings: '学期设置', login: '进入编辑', week: '选择周次', map: '校园地图', reminders: '事项与提醒' })[modal]" @close="close">
     <CampusMap v-if="modal === 'map'" @close="close" />
-    <template v-else-if="modal === 'reminders'"><RemindersEditor v-if="reminderConfig" :config="reminderConfig" :timezone="data.settings.timezone" :busy="busy" :error="error" :last-delivery="lastDelivery" @save="saveReminders" @close="close" /><template v-else><div class="dialog-heading"><h2>事项与提醒</h2><button class="icon-button" aria-label="关闭" @click="close">×</button></div><p v-if="error" class="form-error" role="alert">{{ error }}</p><p v-else class="subtle">正在读取提醒设置…</p></template></template>
+    <template v-else-if="modal === 'reminders'"><RemindersEditor v-if="reminderConfig" :config="reminderConfig" :timezone="data.settings.timezone" :busy="busy" :error="error" :last-delivery="lastDelivery" :initial-item="reminderToEdit" @save="saveReminders" @close="close" /><template v-else><div class="dialog-heading"><h2>事项与提醒</h2><button class="icon-button" aria-label="关闭" @click="close">×</button></div><p v-if="error" class="form-error" role="alert">{{ error }}</p><p v-else class="subtle">正在读取提醒设置…</p></template></template>
     <CourseEditor v-else-if="modal === 'course'" :course="selected" :total-weeks="data.settings.totalWeeks" :busy="busy" :error="error" @save="saveCourse" @delete="deleteCourse" @close="close" />
     <SettingsEditor v-else-if="modal === 'settings'" :settings="data.settings" :busy="busy" :error="error" @save="saveSettings" @close="close" @export="exportData" @import="importData" />
     <template v-else-if="modal === 'detail'"><div class="dialog-heading"><p class="eyebrow">COURSE NOTES</p><button class="icon-button" aria-label="关闭" @click="close">×</button></div><h2>{{ selected.name }}</h2><p class="detail-subtitle">{{ [selected.location, selected.teacher].filter(Boolean).join(' · ') }}</p><div v-for="(s, i) in selected.sessions" :key="i" class="detail-session">{{ weekdays[s.day - 1] }} · {{ s.start }}–{{ s.end }}<small>第 {{ s.weeks }} 周 · {{ s.location || selected.location || '地点待填写' }}</small></div><p v-if="!selected.sessions.length" class="subtle">时间待定，请以授课教师或开课单位通知为准。</p><dl v-if="selected.notes"><dt>备注</dt><dd class="notes"><template v-for="(part, i) in notes" :key="i"><a v-if="part.link" :href="part.text" target="_blank" rel="noopener noreferrer">{{ part.text }}</a><template v-else>{{ part.text }}</template></template></dd></dl><div class="dialog-actions"><button class="secondary" @click="openMap">查看校园地图</button><button v-if="!preview" class="primary" @click="edit(selected)">编辑课程</button></div></template>

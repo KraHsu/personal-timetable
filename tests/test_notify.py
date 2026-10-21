@@ -99,6 +99,45 @@ class NotifyTest(unittest.TestCase):
         self.assertEqual(notify.run(db, 'secret', self.now + timedelta(seconds=180), sender=success), 0)
         db.close()
 
+    def test_multiple_times_independent_deduplication_and_completion_cancels_retries(self):
+        item = {'id': 'multi', 'kind': 'exam', 'title': '考试', 'remindTimes': ['2026-10-19T07:30', '2026-10-19T07:32', '2026-10-19T07:32'], 'dueAt': '', 'notes': '', 'enabled': True, 'completed': False}
+        self.config = {'courseEnabled': False, 'items': [item]}
+        db = self.database()
+        calls = []
+        def success(*args): calls.append(args)
+        self.assertEqual(notify.run(db, 'key', self.now, sender=success), 1)
+        self.assertEqual(notify.run(db, 'key', self.now + timedelta(minutes=1), sender=success), 0)
+        self.assertEqual(notify.run(db, 'key', self.now + timedelta(minutes=2), sender=success), 1)
+        self.assertEqual(notify.run(db, 'key', self.now + timedelta(minutes=3), sender=success), 0)
+        self.assertEqual(len(calls), 2)
+        item['remindTimes'].append('2026-10-19T07:34')
+        db.execute('UPDATE reminders SET body=?', (json.dumps(self.config),)); db.commit()
+        def failing(*args): raise OSError('offline')
+        notify.run(db, 'key', self.now + timedelta(minutes=4), sender=failing)
+        item['completed'] = True
+        db.execute('UPDATE reminders SET body=?', (json.dumps(self.config),)); db.commit()
+        self.assertEqual(notify.run(db, 'key', self.now + timedelta(minutes=6), sender=success), 0)
+        self.assertEqual(len(calls), 2)
+        db.close()
+
+    def test_completion_during_batch_cancels_other_queued_reminders(self):
+        item = {'id': 'multi', 'kind': 'exam', 'title': '考试', 'remindTimes': ['2026-10-19T07:29', '2026-10-19T07:30'], 'enabled': True, 'completed': False}
+        self.config = {'courseEnabled': False, 'items': [item]}
+        db = self.database()
+        def complete(*args):
+            item['completed'] = True
+            with db: db.execute('UPDATE reminders SET body=?', (json.dumps(self.config),))
+        self.assertEqual(notify.run(db, 'key', self.now, sender=complete), 1)
+        self.assertEqual(db.execute('SELECT count(*) FROM notification_deliveries').fetchone()[0], 1)
+        db.close()
+
+    def test_legacy_reminder_keeps_delivery_key_after_conversion(self):
+        item = {'id': 'legacy', 'kind': 'other', 'title': '旧提醒', 'remindAt': '2026-10-19T07:30', 'enabled': True, 'completed': False}
+        self.config = {'courseEnabled': False, 'items': [item]}
+        before = list(notify.jobs(self.schedule, self.config, self.now))[0]['key']
+        item['remindTimes'] = [item.pop('remindAt')]
+        self.assertEqual(list(notify.jobs(self.schedule, self.config, self.now))[0]['key'], before)
+
     def test_server3_route_and_provider_rejection(self):
         class Response:
             def __enter__(self): return self

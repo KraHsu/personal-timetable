@@ -47,6 +47,21 @@ def job(key, title, body, at, expires):
             'body': body, 'at': at, 'expires': expires}
 
 
+def reminder_times(item):
+    # Keep legacy delivery keys unchanged when migrating a single reminder.
+    return sorted(set(item.get('remindTimes', [item['remindAt']] if item.get('remindAt') else [])))
+
+
+def still_active(db, task):
+    if 'item_id' not in task:
+        return True
+    config = json.loads(db.execute('SELECT body FROM reminders WHERE id=1').fetchone()[0])
+    schedule = json.loads(db.execute('SELECT body FROM schedule WHERE id=1').fetchone()[0])
+    return schedule['settings']['timezone'] == task['timezone'] and any(
+        item['id'] == task['item_id'] and not item.get('completed') and item.get('enabled')
+        and task['remind_at'] in reminder_times(item) for item in config.get('items', []))
+
+
 def jobs(schedule, config, now):
     settings = schedule['settings']
     zone = ZoneInfo(settings['timezone'])
@@ -113,23 +128,27 @@ def jobs(schedule, config, now):
             yield job(f'first-course:{course["id"]}:{value}', title, body, at, expires)
     kinds = {'homework': '作业', 'exam': '考试', 'other': '事项'}
     for item in config.get('items', []):
-        if item.get('completed') or not item.get('enabled') or not item.get('remindAt'):
+        if item.get('completed') or not item.get('enabled'):
             continue
-        try:
-            at = local_time(item['remindAt'], zone)
-        except ValueError:
-            print('Skipped invalid item reminder time', file=sys.stderr)
-            continue
-        if not at <= now < at + timedelta(hours=24):
-            continue
-        title = f'{kinds.get(item["kind"], "事项")}提醒 · {item["title"]}'
-        body = f'**{item["title"]}**\n\n提醒时间：{item["remindAt"].replace("T", " ")}（{settings["timezone"]}）'
-        if item.get('dueAt'):
-            body += f'\n\n事项时间：{item["dueAt"].replace("T", " ")}'
-        if item.get('notes'):
-            body += f'\n\n{item["notes"]}'
-        body += '\n\n[打开课表](https://timetable.krahsu.top)'
-        yield job(f'item:{item["id"]}:{item["remindAt"]}:{settings["timezone"]}', title, body, at, at + timedelta(hours=24))
+        for value in reminder_times(item):
+            try:
+                at = local_time(value, zone)
+            except ValueError:
+                print('Skipped invalid item reminder time', file=sys.stderr)
+                continue
+            if not at <= now < at + timedelta(hours=24):
+                continue
+            title = f'{kinds.get(item["kind"], "事项")}提醒 · {item["title"]}'
+            body = f'**{item["title"]}**\n\n提醒时间：{value.replace("T", " ")}（{settings["timezone"]}）'
+            if item.get('dueAt'):
+                body += f'\n\n事项时间：{item["dueAt"].replace("T", " ")}'
+            if item.get('notes'):
+                body += f'\n\n{item["notes"]}'
+            body += '\n\n[打开课表](https://timetable.krahsu.top)'
+            task = job(f'item:{item["id"]}:{value}:{settings["timezone"]}', title, body, at, at + timedelta(hours=24))
+            task.update(item_id=item['id'], remind_at=value, timezone=settings['timezone'])
+            yield task
+
 
 
 def send(sendkey, title, body):
@@ -158,6 +177,8 @@ def run(db, sendkey, now, sender=send, dry_run=False):
         if dry_run:
             print(json.dumps({'title': task['title'], 'at': task['at'].isoformat()}, ensure_ascii=False))
             count += 1
+            continue
+        if not still_active(db, task):
             continue
         attempts = (record[1] if record else 0) + 1
         with db:

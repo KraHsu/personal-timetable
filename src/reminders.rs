@@ -44,10 +44,23 @@ pub struct Item {
     pub title: String,
     pub kind: String,
     pub due_at: String,
+    #[serde(default)]
+    pub remind_times: Vec<String>,
+    #[serde(default, skip_serializing)]
     pub remind_at: String,
     pub notes: String,
     pub enabled: bool,
     pub completed: bool,
+}
+impl Item {
+    fn normalize(&mut self) {
+        if self.remind_times.is_empty() && !self.remind_at.is_empty() {
+            self.remind_times.push(self.remind_at.clone());
+        }
+        self.remind_at.clear();
+        self.remind_times.sort();
+        self.remind_times.dedup();
+    }
 }
 impl ReminderConfig {
     fn validate(mut self) -> Result<Self, String> {
@@ -61,6 +74,11 @@ impl ReminderConfig {
         }
         let mut ids = BTreeSet::new();
         for i in &mut self.items {
+            i.normalize();
+            if i.remind_times.len() > 20 || (i.enabled && !i.completed && i.remind_times.is_empty())
+            {
+                return Err("启用提醒的待办事项须设置 1–20 个提醒时间".into());
+            }
             i.title = i.title.trim().into();
             i.notes = i.notes.trim().into();
             if i.id.is_empty()
@@ -80,13 +98,11 @@ impl ReminderConfig {
             {
                 return Err("请填写事项名称、有效类型，并检查文字长度".into());
             }
-            for (value, required) in [
-                (&i.due_at, false),
-                (&i.remind_at, i.enabled && !i.completed),
-            ] {
-                if value.is_empty() && !required {
-                    continue;
-                }
+            for value in i
+                .remind_times
+                .iter()
+                .chain((!i.due_at.is_empty()).then_some(&i.due_at))
+            {
                 let dt = NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M")
                     .map_err(|_| "请填写有效的日期和时间")?;
                 if !(2000..=2100).contains(&dt.year())
@@ -115,7 +131,8 @@ pub async fn read(State(state): State<AppState>, headers: HeaderMap) -> ApiResul
     tokio::task::spawn_blocking(move || {
         let db = state.db.lock().map_err(internal)?;
         let (revision, raw): (i64, String) = db.query_row("SELECT revision,body FROM reminders WHERE id=1", [], |r| Ok((r.get(0)?,r.get(1)?))).map_err(internal)?;
-        let data: ReminderConfig = serde_json::from_str(&raw).map_err(internal)?;
+        let mut data: ReminderConfig = serde_json::from_str(&raw).map_err(internal)?;
+        for item in &mut data.items { item.normalize(); }
         let last: Option<(String, String)> = db.query_row("SELECT sent_at,title FROM notification_deliveries WHERE status='sent' ORDER BY sent_at DESC LIMIT 1", [], |r| Ok((r.get(0)?, r.get(1)?))).optional().map_err(internal)?;
         Ok(Json(json!({"data":data,"revision":revision,"lastDelivery":last.map(|(at,title)|json!({"at":at,"title":title}))})).into_response())
     }).await.map_err(internal)?
