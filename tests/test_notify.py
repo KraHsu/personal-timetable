@@ -108,6 +108,7 @@ class NotifyTest(unittest.TestCase):
             notify.send('sctp123tabcdef', '测试', '内容')
             self.assertEqual(request.call_args.args[0].full_url, 'https://123.push.ft07.com/send/sctp123tabcdef.send')
             self.assertIn('title=', request.call_args.args[0].data.decode())
+            self.assertIn('TimetableReminder', request.call_args.args[0].get_header('User-agent'))
         with self.assertRaises(ValueError): notify.send('old-key', '测试', '')
         with patch.object(notify.urllib.request, 'urlopen', return_value=Response()), patch.object(notify.json, 'load', return_value={'code': 1}):
             with self.assertRaises(RuntimeError): notify.send('sctp123tabcdef', '测试', '')

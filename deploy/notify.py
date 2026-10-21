@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import sqlite3
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from zoneinfo import ZoneInfo
@@ -137,7 +138,7 @@ def send(sendkey, title, body):
         raise ValueError('Server3 SendKey missing or invalid')
     url = f'https://{match[1]}.push.ft07.com/send/{sendkey}.send'
     data = urllib.parse.urlencode({'title': title, 'desp': body, 'tags': 'timetable'}).encode()
-    request = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/x-www-form-urlencoded'})
+    request = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Mozilla/5.0 (compatible; TimetableReminder/2.0)'})
     with urllib.request.urlopen(request, timeout=20) as response:
         result = json.load(response)
     if result.get('code') != 0 or result.get('errno', 0) != 0:
@@ -167,7 +168,8 @@ def run(db, sendkey, now, sender=send, dry_run=False):
             delay = min(900, 30 * 2 ** min(attempts, 5))
             with db:
                 db.execute('UPDATE notification_deliveries SET next_attempt=? WHERE key=?', (int(now.timestamp()) + delay, task['key']))
-            print(f'Notification failed ({type(error).__name__}); retry scheduled', file=sys.stderr)
+            reason = f'HTTP {error.code}' if isinstance(error, urllib.error.HTTPError) else type(error).__name__
+            print(f'Notification failed ({reason}); retry scheduled', file=sys.stderr)
             continue
         with db:
             db.execute("UPDATE notification_deliveries SET status='sent',sent_at=? WHERE key=?", (now.isoformat(), task['key']))
