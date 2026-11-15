@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { graphLayout, normalizeReminders, removeTask, taskState, validateTaskGraph, wouldCycle } from '../web/src/reminders.mjs';
+import { connectTasks, saveGraphTask, graphLayout, normalizeReminders, removeTask, taskState, validateTaskGraph, wouldCycle } from '../web/src/reminders.mjs';
 
 const diamond = () => [
   { id: 'a', title: '收集资料', completed: true, dependsOn: [] },
@@ -35,6 +35,18 @@ describe('task dependencies', () => {
     const config = removeTask({ lists: [], items: diamond() }, 'a');
     expect(config.items.map(x => x.dependsOn)).toEqual([[], [], ['b', 'c']]);
     expect(() => validateTaskGraph(config)).not.toThrow();
+  });
+  it('connects existing tasks and atomically inserts a prerequisite without mutating inputs', () => {
+    const items = diamond(), original = structuredClone(items);
+    expect(() => connectTasks(items, 'd', 'a')).toThrow('循环');
+    expect(() => connectTasks(items, 'a', 'a')).toThrow('循环');
+    expect(() => connectTasks(items, 'a', 'b')).toThrow('已经有连线');
+    expect(() => connectTasks(items, 'missing', 'b')).toThrow('不存在');
+    const next = saveGraphTask(items, { id: 'new', title: '审阅', dependsOn: [] }, { id: 'd', direction: 'before' });
+    expect(next.find(x => x.id === 'd').dependsOn).toEqual(['b', 'c', 'new']);
+    expect(() => validateTaskGraph({ items: next })).not.toThrow();
+    expect(items).toEqual(original);
+    expect(() => saveGraphTask(items, { id: 'new', dependsOn: ['d'] }, { id: 'a', direction: 'before' })).toThrow('循环');
   });
   it('lays out joins after both parents and preserves ancestors in filtered graphs', () => {
     const layout = graphLayout(diamond(), new Set(['d']));

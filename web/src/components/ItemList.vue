@@ -2,8 +2,10 @@
 import { computed, ref, watch } from 'vue';
 import { reminderTimes, taskState, taskStateLabels } from '../reminders.mjs';
 import TaskGraph from './TaskGraph.vue';
-const props = defineProps({ items: Array, busy: Boolean, lists: { type: Array, default: () => [] } });
+const props = defineProps({ items: Array, busy: Boolean, revision: Number, saveGraph: Function, error: String, lists: { type: Array, default: () => [] } });
 const emit = defineEmits(['edit', 'toggle', 'delete']);
+const graph = ref(null);
+function switchView(value) { if (view.value === 'graph' && !graph.value?.canLeave()) return; view.value = value; }
 const filter = ref('all'), search = ref(''), list = ref('*'), view = ref('list');
 watch(() => props.lists, () => { if (list.value && list.value !== '*' && !props.lists.some(x => x.id === list.value)) list.value = '*'; });
 const scoped = computed(() => props.items.filter(x => list.value === '*' || (x.listId || '') === list.value));
@@ -11,16 +13,17 @@ const dependencies = item => (item.dependsOn ?? []).map(id => props.items.find(x
 const labels = { homework: '作业', exam: '考试', other: '事项' };
 const counts = computed(() => ({ all: scoped.value.length, pending: scoped.value.filter(x => !x.completed).length, completed: scoped.value.filter(x => x.completed).length, ready: scoped.value.filter(x => taskState(x, props.items) === 'ready').length, blocked: scoped.value.filter(x => taskState(x, props.items) === 'blocked').length }));
 const visible = computed(() => scoped.value.filter(x => (filter.value === 'all' || (filter.value === 'pending' ? !x.completed : taskState(x, props.items) === filter.value)) && `${x.title} ${x.notes} ${labels[x.kind]}`.toLowerCase().includes(search.value.trim().toLowerCase())).sort((a,b) => Number(a.completed) - Number(b.completed) || (a.dueAt || reminderTimes(a)[0] || '9999').localeCompare(b.dueAt || reminderTimes(b)[0] || '9999')));
+function revealTask() { filter.value = 'all'; search.value = ''; list.value = '*'; }
 function dateLabel(value) { const [date, time] = value.split('T'); return date.replaceAll('-', '/') + '  ' + time; }
 </script>
 <template>
-  <div class="task-board-toolbar"><label>清单<select v-model="list" aria-label="选择清单"><option value="*">全部清单</option><option value="">收集箱</option><option v-for="entry in lists" :key="entry.id" :value="entry.id">{{ entry.name }}</option></select></label><div class="view-switch" aria-label="任务视图"><button :aria-pressed="view === 'list'" :class="{ active: view === 'list' }" @click="view = 'list'">清单视图</button><button :aria-pressed="view === 'graph'" :class="{ active: view === 'graph' }" @click="view = 'graph'">依赖图</button></div></div>
+  <div class="task-board-toolbar"><label>清单<select v-model="list" aria-label="选择清单"><option value="*">全部清单</option><option value="">收集箱</option><option v-for="entry in lists" :key="entry.id" :value="entry.id">{{ entry.name }}</option></select></label><div class="view-switch" aria-label="任务视图"><button :aria-pressed="view === 'list'" :class="{ active: view === 'list' }" @click="switchView('list')">清单视图</button><button :aria-pressed="view === 'graph'" :class="{ active: view === 'graph' }" @click="switchView('graph')">依赖图</button></div></div>
   <div class="item-list-tools">
     <div class="item-filters" aria-label="筛选事项"><button v-for="(label, key) in { all: '全部', pending: '待办', completed: '已完成', ready: '可开始', blocked: '等待前置' }" :key="key" :aria-pressed="filter === key" @click="filter = key">{{ label }}<span>{{ counts[key] }}</span></button></div>
     <div class="item-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><input v-model="search" type="search" aria-label="搜索事项" placeholder="搜索名称、备注…"></div>
   </div>
-  <div v-if="!visible.length" class="items-empty"><span class="items-empty-mark" aria-hidden="true">{{ items.length ? '⌕' : '✓' }}</span><h3>{{ items.length ? '没有找到这件事' : '暂时没有待记录的事' }}</h3><p>{{ items.length ? '没有符合条件的事项，试试其他关键词或筛选。' : '下一份作业、下一场考试，都可以记在这里。' }}</p></div>
-  <TaskGraph v-else-if="view === 'graph'" :items="items" :visible-ids="new Set(visible.map(x => x.id))" :busy="busy" @edit="emit('edit', $event)" />
+  <TaskGraph ref="graph" v-if="view === 'graph'" :items="items" :lists="lists" :default-list-id="list === '*' ? '' : list" :visible-ids="new Set(visible.map(x => x.id))" :revision="revision" :save-graph="saveGraph" :error="error" :busy="busy" @reveal="revealTask" />
+  <div v-else-if="!visible.length" class="items-empty"><span class="items-empty-mark" aria-hidden="true">{{ items.length ? '⌕' : '✓' }}</span><h3>{{ items.length ? '没有找到这件事' : '暂时没有待记录的事' }}</h3><p>{{ items.length ? '没有符合条件的事项，试试其他关键词或筛选。' : '下一份作业、下一场考试，都可以记在这里。' }}</p></div>
   <div v-else class="item-cards">
     <article v-for="item in visible" :key="item.id" class="reminder-item" :class="[item.kind, { completed: item.completed }]" :data-item-id="item.id">
       <div class="reminder-info">

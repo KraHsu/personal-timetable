@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { reminderTimes, removeTask, wouldCycle } from '../reminders.mjs';
 import ItemList from './ItemList.vue';
 import TaskLists from './TaskLists.vue';
-const props = defineProps(['config', 'timezone', 'busy', 'error', 'lastDelivery', 'initialItem']);
+const props = defineProps(['config', 'timezone', 'busy', 'error', 'lastDelivery', 'initialItem', 'revision', 'saveGraph']);
 const emit = defineEmits(['save', 'close']);
 const draft = ref(null);
 const dependencySearch = ref('');
@@ -53,7 +53,7 @@ function remove(item) { if (confirm(`删除「${item.title}」？相关依赖连
   <template v-else>
     <TaskLists :config="config" :busy="busy" @save="emit('save', $event)" />
     <div class="section-heading"><h3>我的事项 · {{ config.items.length }}</h3><button id="add-reminder" class="text-button" :disabled="busy" @click="edit()">＋ 添加事项</button></div>
-    <ItemList :items="config.items" :lists="config.lists" :busy="busy" @edit="edit" @toggle="toggle" @delete="remove" />
+    <ItemList :items="config.items" :lists="config.lists" :revision="revision" :save-graph="saveGraph" :error="error" :busy="busy" @edit="edit" @toggle="toggle" @delete="remove" />
     <div class="dialog-actions"><span></span><button class="secondary" :disabled="busy" @click="emit('close')">关闭</button></div>
   </template>
 </template>

@@ -56,6 +56,22 @@ export function removeTask(config, id) {
   return { ...config, items: config.items.filter(x => x.id !== id).map(x => ({ ...x, dependsOn: (x.dependsOn ?? []).filter(parent => parent !== id) })) };
 }
 
+export function connectTasks(items, from, to) {
+  const target = items.find(x => x.id === to);
+  if (!items.some(x => x.id === from) || !target) throw new Error('任务已不存在，请刷新后重试');
+  if (from === to || wouldCycle(items, to, from)) throw new Error('这条连线会形成循环，请选择其他任务');
+  if ((target.dependsOn ?? []).includes(from)) throw new Error('这两个任务之间已经有连线');
+  return items.map(x => x.id === to ? { ...x, dependsOn: [...(x.dependsOn ?? []), from] } : x);
+}
+
+export function saveGraphTask(items, item, relation = null) {
+  let next = items.some(x => x.id === item.id) ? items.map(x => x.id === item.id ? item : x) : [...items, item];
+  if (relation) next = relation.direction === 'before' ? connectTasks(next, item.id, relation.id) : connectTasks(next, relation.id, item.id);
+  return next;
+}
+
+export const taskNodeWidth = 240, taskNodeHeight = 128;
+
 // Include prerequisites in filtered views so no dependency is silently hidden.
 export function graphLayout(items, visibleIds) {
   const byId = new Map(items.map(x => [x.id, x]));
@@ -78,9 +94,9 @@ export function graphLayout(items, visibleIds) {
   const nodes = items.filter(x => included.has(x.id)).map(item => {
     const column = depth(item.id), row = rows.get(column) ?? 0;
     rows.set(column, row + 1);
-    return { item, x: 24 + column * 280, y: 24 + row * 124, context: !visibleIds.has(item.id) };
+    return { item, x: 32 + column * 320, y: 40 + row * 176, context: !visibleIds.has(item.id) };
   });
   const positions = new Map(nodes.map(x => [x.item.id, x]));
   const edges = nodes.flatMap(node => (node.item.dependsOn ?? []).filter(id => positions.has(id)).map(id => ({ from: positions.get(id), to: node })));
-  return { nodes, edges, width: Math.max(560, ...nodes.map(x => x.x + 244)), height: Math.max(180, ...nodes.map(x => x.y + 116)) };
+  return { nodes, edges, width: Math.max(560, ...nodes.map(x => x.x + taskNodeWidth + 32)), height: Math.max(300, ...nodes.map(x => x.y + taskNodeHeight + 40)) };
 }
