@@ -39,6 +39,7 @@ describe('Vue timetable', () => {
     await wrapper.find('#add-reminder').trigger('click');
     await wrapper.find('[name=title]').setValue('期中考试');
     await wrapper.find('[name=kind]').setValue('exam');
+    await wrapper.find('[name=enabled]').setValue(true);
     await wrapper.find('[name=dueAt]').setValue('2026-11-10T09:00');
     await wrapper.find('[name=remindTime-0]').setValue('2026-11-08T20:15');
     await button('＋ 添加提醒时间').trigger('click');
@@ -93,6 +94,55 @@ describe('Vue timetable', () => {
     await wrapper.find('#reminder-form').trigger('submit'); await flushPromises();
     expect(wrapper.find('[name=title]').element.value).toBe('保留提醒草稿');
     expect(wrapper.find('[role=alert]').text()).toContain('另一台设备');
+  });
+  it('manages lists, optional reminders, cross-list dependencies and graph editing', async () => {
+    reminders.items = [{ id: 'research', title: '收集资料', kind: 'other', dueAt: '', remindTimes: [], notes: '', enabled: false, completed: false }];
+    await start(true); await wrapper.find('#reminders-button').trigger('click'); await flushPromises();
+    await wrapper.find('[name=listName]').setValue('毕业设计');
+    await wrapper.find('.task-list-form').trigger('submit'); await flushPromises();
+    const listId = reminders.lists[0].id;
+    await wrapper.find('#add-reminder').trigger('click');
+    await wrapper.find('[name=title]').setValue('完成初稿');
+    await wrapper.find('[name=listId]').setValue(listId);
+    await wrapper.find('[aria-label="前置任务：收集资料"]').setValue(true);
+    await wrapper.find('#reminder-form').trigger('submit'); await flushPromises();
+    const task = reminders.items.find(x => x.title === '完成初稿');
+    expect(task).toMatchObject({ listId, dependsOn: ['research'], enabled: false, remindTimes: [] });
+    await button('关闭').trigger('click');
+    const board = wrapper.find('#all-items');
+    expect(board.find(`[data-item-id="${task.id}"]`).text()).toContain('等待前置');
+    await board.find('[aria-label="选择清单"]').setValue(listId);
+    expect(board.findAll('.reminder-item')).toHaveLength(1);
+    await board.findAll('[aria-label="任务视图"] button')[1].trigger('click');
+    expect(board.findAll('.task-node')).toHaveLength(2);
+    expect(board.findAll('.task-graph svg > path')).toHaveLength(1);
+    await board.find('[data-task-id="research"]').trigger('click'); await flushPromises();
+    expect(wrapper.find('[aria-label="前置任务：完成初稿"]').element.disabled).toBe(true);
+    await button('返回列表').trigger('click');
+    await wrapper.find('dialog [data-item-id="research"] .item-complete').trigger('click'); await flushPromises();
+    await button('关闭').trigger('click');
+    expect(board.find(`[data-task-id="${task.id}"]`).text()).toContain('可开始');
+    await wrapper.find('#reminders-button').trigger('click'); await flushPromises();
+    await button('重命名').trigger('click');
+    await wrapper.find('[name=listName]').setValue('论文');
+    await wrapper.find('.task-list-form').trigger('submit'); await flushPromises();
+    expect(reminders.lists[0].name).toBe('论文');
+    await button('删除清单').trigger('click'); await flushPromises();
+    expect(reminders.lists).toEqual([]);
+    expect(reminders.items.find(x => x.id === task.id)).toMatchObject({ listId: '', dependsOn: ['research'] });
+    await wrapper.find('dialog [data-item-id="research"] .item-delete').trigger('click'); await flushPromises();
+    expect(reminders.items[0].dependsOn).toEqual([]);
+    await button('关闭').trigger('click');
+    await button('退出编辑').trigger('click'); await flushPromises();
+    expect(wrapper.findAll('.task-node')).toHaveLength(0);
+    expect(wrapper.text()).not.toContain('完成初稿');
+  });
+  it('hides private tasks when the session expires during a save', async () => {
+    reminders.items = [{ id: 'private', title: '私人待办', kind: 'other', dueAt: '', remindTimes: [], notes: '', enabled: false, completed: false }];
+    await start(true);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 401, json: async () => ({ error: '登录已过期' }) })));
+    await wrapper.find('[data-item-id="private"] .item-complete').trigger('click'); await flushPromises();
+    expect(wrapper.text()).not.toContain('私人待办');
   });
   it('opens the map without login, zooms it and returns to the course details', async () => {
     vi.stubGlobal('ResizeObserver', class {

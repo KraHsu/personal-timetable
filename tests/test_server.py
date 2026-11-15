@@ -193,6 +193,39 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.call('PUT', path, current, cookie)[0], 200)
         self.assertTrue(self.call(path=path, cookie=cookie)[2]['data']['items'][0]['completed'])
 
+    def test_task_graph_validation_and_persistence(self):
+        path, cookie = '/api/reminders', self.legacy_cookie()
+        current = self.call(path=path, cookie=cookie)[2]
+        data = {'courseEnabled': False, 'firstCourseEnabled': False, 'firstCourseTime': '18:00',
+                'lists': [{'id': 'work', 'name': '论文'}, {'id': 'study', 'name': '学习'}],
+                'items': [dict(id=id, title=id, kind='other', dueAt='', remindTimes=[], notes='', enabled=False,
+                               completed=False, listId='work' if id != 'a' else 'study', dependsOn=deps)
+                          for id, deps in [('a', []), ('b', ['a']), ('c', ['a']), ('d', ['b', 'c'])]]}
+        payload = {'data': data, 'revision': current['revision']}
+        code, _, saved = self.call('PUT', path, payload, cookie)
+        self.assertEqual(code, 200)
+        self.assertEqual(saved['data']['items'][3]['dependsOn'], ['b', 'c'])
+        self.assertEqual(self.call('PUT', path, payload, cookie)[0], 409)
+        invalid = []
+        for index, deps in [(0, ['d']), (0, ['a']), (1, ['missing']), (1, ['a', 'a'])]:
+            bad = copy.deepcopy(data); bad['items'][index]['dependsOn'] = deps; invalid.append(bad)
+        bad = copy.deepcopy(data); bad['items'][0]['listId'] = 'missing'; invalid.append(bad)
+        bad = copy.deepcopy(data); bad['lists'].append(bad['lists'][0]); invalid.append(bad)
+        bad = copy.deepcopy(data); bad['lists'][0]['name'] = ' '; invalid.append(bad)
+        bad = copy.deepcopy(data); bad['lists'] = [{'id': str(i), 'name': 'x'} for i in range(51)]; invalid.append(bad)
+        # A disconnected cycle must also be rejected.
+        bad = copy.deepcopy(data)
+        bad['items'][0]['dependsOn'] = ['b']; bad['items'][1]['dependsOn'] = ['a']
+        bad['items'][2]['dependsOn'] = []; bad['items'][3]['dependsOn'] = ['c']; invalid.append(bad)
+        for bad in invalid:
+            self.assertEqual(self.call('PUT', path, {'data': bad, 'revision': saved['revision']}, cookie)[0], 400)
+        self.assertEqual(self.call(path=path, cookie=cookie)[2]['revision'], saved['revision'])
+        self.process.terminate(); self.process.wait(timeout=10); self.start_server()
+        reread = self.call(path=path, cookie=cookie)[2]
+        self.assertEqual(reread['data'], saved['data'])
+        self.assertEqual(self.call(path=path)[0], 401)
+        self.assertNotIn('lists', self.call()[2]['data'])
+
     def test_rate_limit(self):
         for _ in range(10):
             self.assertEqual(self.call('POST', '/api/login', {'password': 'wrong'}, extra={'X-Real-IP': '192.0.2.1'})[0], 401)

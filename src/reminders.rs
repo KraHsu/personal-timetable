@@ -9,7 +9,21 @@ use chrono::{Datelike, NaiveDateTime};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TaskList {
+    pub id: String,
+    pub name: String,
+}
+
+fn valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 80
+        && id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +33,8 @@ pub struct ReminderConfig {
     pub first_course_enabled: bool,
     #[serde(default = "friday_time")]
     pub first_course_time: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lists: Vec<TaskList>,
     pub items: Vec<Item>,
 }
 fn enabled() -> bool {
@@ -33,6 +49,7 @@ impl Default for ReminderConfig {
             course_enabled: true,
             first_course_enabled: true,
             first_course_time: friday_time(),
+            lists: vec![],
             items: vec![],
         }
     }
@@ -51,6 +68,10 @@ pub struct Item {
     pub notes: String,
     pub enabled: bool,
     pub completed: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub list_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
 }
 impl Item {
     fn normalize(&mut self) {
@@ -72,23 +93,32 @@ impl ReminderConfig {
         if self.items.len() > 300 {
             return Err("最多支持 300 个事项".into());
         }
+        if self.lists.len() > 50 {
+            return Err("最多支持 50 个清单".into());
+        }
+        let mut list_ids = BTreeSet::new();
+        for list in &mut self.lists {
+            list.name = list.name.trim().into();
+            if !valid_id(&list.id) || !list_ids.insert(list.id.clone()) {
+                return Err("清单 ID 无效或重复".into());
+            }
+            if list.name.is_empty() || list.name.chars().count() > 60 {
+                return Err("清单名称须为 1–60 个字符".into());
+            }
+        }
         let mut ids = BTreeSet::new();
         for i in &mut self.items {
             i.normalize();
+            if !i.list_id.is_empty() && !list_ids.contains(&i.list_id) {
+                return Err("任务所属清单不存在".into());
+            }
             if i.remind_times.len() > 20 || (i.enabled && !i.completed && i.remind_times.is_empty())
             {
                 return Err("启用提醒的待办事项须设置 1–20 个提醒时间".into());
             }
             i.title = i.title.trim().into();
             i.notes = i.notes.trim().into();
-            if i.id.is_empty()
-                || i.id.len() > 80
-                || !i
-                    .id
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
-                || !ids.insert(i.id.clone())
-            {
+            if !valid_id(&i.id) || !ids.insert(i.id.clone()) {
                 return Err("事项 ID 无效或重复".into());
             }
             if i.title.is_empty()
@@ -111,6 +141,37 @@ impl ReminderConfig {
                     return Err("日期须在 2000–2100 年之间".into());
                 }
             }
+        }
+        // Kahn's algorithm validates the whole graph, including disconnected components.
+        let mut incoming = BTreeMap::new();
+        let mut children: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for item in &self.items {
+            let mut seen = BTreeSet::new();
+            for parent in &item.depends_on {
+                if parent == &item.id || !ids.contains(parent) || !seen.insert(parent) {
+                    return Err("前置任务无效：不能引用自身、不存在或重复的任务".into());
+                }
+                children.entry(parent).or_default().push(&item.id);
+            }
+            incoming.insert(item.id.as_str(), item.depends_on.len());
+        }
+        let mut queue: VecDeque<&str> = incoming
+            .iter()
+            .filter_map(|(&id, &n)| (n == 0).then_some(id))
+            .collect();
+        let mut visited = 0;
+        while let Some(id) = queue.pop_front() {
+            visited += 1;
+            for child in children.get(id).into_iter().flatten() {
+                let n = incoming.get_mut(child).expect("Validated task reference");
+                *n -= 1;
+                if *n == 0 {
+                    queue.push_back(child);
+                }
+            }
+        }
+        if visited != self.items.len() {
+            return Err("任务依赖形成了循环，请移除一条依赖后重试".into());
         }
         Ok(self)
     }
